@@ -41,7 +41,6 @@
 #include <asm/system_misc.h>
 #include <asm/tlbflush.h>
 #include <asm/traps.h>
-#include <asm/virt.h>
 
 #include <trace/hooks/fault.h>
 
@@ -254,15 +253,6 @@ static inline bool is_el1_permission_fault(unsigned long addr, unsigned int esr,
 	return false;
 }
 
-static bool is_pkvm_stage2_abort(unsigned int esr)
-{
-	/*
-	 * S1PTW should only ever be set in ESR_EL1 if the pkvm hypervisor
-	 * injected a stage-2 abort -- see host_inject_abort().
-	 */
-	return is_pkvm_initialized() && (esr & ESR_ELx_S1PTW);
-}
-
 static bool __kprobes is_spurious_el1_translation_fault(unsigned long addr,
 							unsigned int esr,
 							struct pt_regs *regs)
@@ -272,9 +262,6 @@ static bool __kprobes is_spurious_el1_translation_fault(unsigned long addr,
 
 	if (ESR_ELx_EC(esr) != ESR_ELx_EC_DABT_CUR ||
 	    (esr & ESR_ELx_FSC_TYPE) != ESR_ELx_FSC_FAULT)
-		return false;
-
-	if (is_pkvm_stage2_abort(esr))
 		return false;
 
 	local_irq_save(flags);
@@ -319,11 +306,24 @@ static void die_kernel_fault(const char *msg, unsigned long addr,
 static void report_tag_fault(unsigned long addr, unsigned int esr,
 			     struct pt_regs *regs)
 {
+	static bool reported;
+	bool is_write;
+
+	if (READ_ONCE(reported))
+		return;
+
+	/*
+	 * This is used for KASAN tests and assumes that no MTE faults
+	 * happened before running the tests.
+	 */
+	if (mte_report_once())
+		WRITE_ONCE(reported, true);
+
 	/*
 	 * SAS bits aren't set for all faults reported in EL1, so we can't
 	 * find out access size.
 	 */
-	bool is_write = !!(esr & ESR_ELx_WNR);
+	is_write = !!(esr & ESR_ELx_WNR);
 	kasan_report(addr, 0, is_write, regs->pc);
 }
 #else
@@ -361,6 +361,11 @@ static bool is_el1_mte_sync_tag_check_fault(unsigned int esr)
 	return false;
 }
 
+static bool is_translation_fault(unsigned long esr)
+{
+	return (esr & ESR_ELx_FSC_TYPE) == ESR_ELx_FSC_FAULT;
+}
+
 static void __do_kernel_fault(unsigned long addr, unsigned int esr,
 			      struct pt_regs *regs)
 {
@@ -392,10 +397,9 @@ static void __do_kernel_fault(unsigned long addr, unsigned int esr,
 			msg = "read from unreadable memory";
 	} else if (addr < PAGE_SIZE) {
 		msg = "NULL pointer dereference";
-	} else if (is_pkvm_stage2_abort(esr)) {
-		msg = "access to hypervisor-protected memory";
 	} else {
-		if (kfence_handle_page_fault(addr, esr & ESR_ELx_WNR, regs))
+		if (is_translation_fault(esr) &&
+		    kfence_handle_page_fault(addr, esr & ESR_ELx_WNR, regs))
 			return;
 
 		msg = "paging request";
@@ -572,13 +576,6 @@ static int __kprobes do_page_fault(unsigned long far, unsigned int esr,
 					 addr, esr, regs);
 	}
 
-	if (is_pkvm_stage2_abort(esr)) {
-		if (!user_mode(regs))
-			goto no_context;
-		arm64_force_sig_fault(SIGSEGV, SEGV_ACCERR, far, "stage-2 fault");
-		return 0;
-	}
-
 	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, regs, addr);
 
 	/*
@@ -720,7 +717,11 @@ static int do_alignment_fault(unsigned long far, unsigned int esr,
 
 static int do_bad(unsigned long far, unsigned int esr, struct pt_regs *regs)
 {
-	return 1; /* "fault" */
+	unsigned long addr = untagged_addr(far);
+	int ret = 1;
+
+	trace_android_vh_handle_tlb_conf(addr, esr, &ret);
+	return ret;
 }
 
 static int do_sea(unsigned long far, unsigned int esr, struct pt_regs *regs)

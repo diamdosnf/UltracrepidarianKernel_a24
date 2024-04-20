@@ -907,8 +907,16 @@ static bool prepare_signal(int sig, struct task_struct *p, bool force)
 	sigset_t flush;
 
 	if (signal->flags & (SIGNAL_GROUP_EXIT | SIGNAL_GROUP_COREDUMP)) {
+#ifdef CONFIG_MTK_AVOID_TRUNCATE_COREDUMP
+		if (signal->flags & SIGNAL_GROUP_COREDUMP) {
+			pr_debug("[%d:%s] skip sig %d due to coredump is doing\n",
+					p->pid, p->comm, sig);
+			return 0;
+		}
+#else
 		if (!(signal->flags & SIGNAL_GROUP_EXIT))
 			return sig == SIGKILL;
+#endif
 		/*
 		 * The process is in the middle of dying, nothing to do.
 		 */
@@ -1419,6 +1427,7 @@ int group_send_sig_info(int sig, struct kernel_siginfo *info,
 			bool reap = false;
 
 			trace_android_vh_process_killed(current, &reap);
+			trace_android_vh_killed_process(current, p, &reap);
 			if (reap)
 				add_to_oom_reaper(p);
 		}

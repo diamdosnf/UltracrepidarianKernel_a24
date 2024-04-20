@@ -111,6 +111,9 @@ int xhci_halt(struct xhci_hcd *xhci)
 {
 	int ret;
 	xhci_dbg_trace(xhci, trace_xhci_dbg_init, "// Halt the HC");
+#ifdef CONFIG_USB_DEBUG_DETAILED_LOG
+	xhci_info(xhci, "%s\n", __func__);
+#endif
 	xhci_quiesce(xhci);
 
 	ret = xhci_handshake(&xhci->op_regs->status,
@@ -196,8 +199,12 @@ int xhci_reset(struct xhci_hcd *xhci, u64 timeout_us)
 		udelay(1000);
 
 	ret = xhci_handshake(&xhci->op_regs->command, CMD_RESET, 0, timeout_us);
-	if (ret)
+	if (ret) {
+#if defined(CONFIG_USB_HOST_SAMSUNG_FEATURE)
+		xhci_warn(xhci, "%s CMD_RESET is fail!!\n", __func__);
+#endif
 		return ret;
+	}
 
 	if (xhci->quirks & XHCI_ASMEDIA_MODIFY_FLOWCONTROL)
 		usb_asmedia_modifyflowcontrol(to_pci_dev(xhci_to_hcd(xhci)->self.controller));
@@ -209,7 +216,10 @@ int xhci_reset(struct xhci_hcd *xhci, u64 timeout_us)
 	 * than status until the "Controller Not Ready" flag is cleared.
 	 */
 	ret = xhci_handshake(&xhci->op_regs->status, STS_CNR, 0, timeout_us);
-
+#if defined(CONFIG_USB_HOST_SAMSUNG_FEATURE)
+	if (ret)
+		xhci_warn(xhci, "%s STS_CNR is fail!!\n", __func__);
+#endif
 	xhci->usb2_rhub.bus_state.port_c_suspend = 0;
 	xhci->usb2_rhub.bus_state.suspended_ports = 0;
 	xhci->usb2_rhub.bus_state.resuming_ports = 0;
@@ -793,7 +803,6 @@ void xhci_shutdown(struct usb_hcd *hcd)
 
 	spin_lock_irq(&xhci->lock);
 	xhci_halt(xhci);
-
 	/*
 	 * Workaround for spurious wakeps at shutdown with HSW, and for boot
 	 * firmware delay in ADL-P PCH if port are left in U3 at shutdown
@@ -801,7 +810,6 @@ void xhci_shutdown(struct usb_hcd *hcd)
 	if (xhci->quirks & XHCI_SPURIOUS_WAKEUP ||
 	    xhci->quirks & XHCI_RESET_TO_DEFAULT)
 		xhci_reset(xhci, XHCI_RESET_SHORT_USEC);
-
 	spin_unlock_irq(&xhci->lock);
 
 	xhci_cleanup_msix(xhci);
@@ -1010,7 +1018,8 @@ int xhci_suspend(struct xhci_hcd *xhci, bool do_wakeup)
 	xhci_dbc_suspend(xhci);
 
 	/* Don't poll the roothubs on bus suspend. */
-	xhci_dbg(xhci, "%s: stopping port polling.\n", __func__);
+	xhci_dbg(xhci, "%s: stopping usb%d port polling.\n",
+		 __func__, hcd->self.busnum);
 	clear_bit(HCD_FLAG_POLL_RH, &hcd->flags);
 	del_timer_sync(&hcd->rh_timer);
 	clear_bit(HCD_FLAG_POLL_RH, &xhci->shared_hcd->flags);
@@ -1282,7 +1291,8 @@ int xhci_resume(struct xhci_hcd *xhci, bool hibernated)
 		usb_asmedia_modifyflowcontrol(to_pci_dev(hcd->self.controller));
 
 	/* Re-enable port polling. */
-	xhci_dbg(xhci, "%s: starting port polling.\n", __func__);
+	xhci_dbg(xhci, "%s: starting usb%d port polling.\n",
+		 __func__, hcd->self.busnum);
 	set_bit(HCD_FLAG_POLL_RH, &xhci->shared_hcd->flags);
 	usb_hcd_poll_rh_status(xhci->shared_hcd);
 	set_bit(HCD_FLAG_POLL_RH, &hcd->flags);
@@ -1341,7 +1351,6 @@ unsigned int xhci_get_endpoint_address(unsigned int ep_index)
 	unsigned int direction = ep_index % 2 ? USB_DIR_OUT : USB_DIR_IN;
 	return direction | number;
 }
-EXPORT_SYMBOL_GPL(xhci_get_endpoint_address);
 
 /* Find the flag for this endpoint (for use in the control context).  Use the
  * endpoint index to create a bitmask.  The slot context is bit 0, endpoint 0 is
@@ -1741,8 +1750,20 @@ static int xhci_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 			goto done;
 		}
 		ep->ep_state |= EP_STOP_CMD_PENDING;
+#if !IS_ENABLED(CONFIG_USB_HOST_SAMSUNG_FEATURE)
 		ep->stop_cmd_timer.expires = jiffies +
 			XHCI_STOP_EP_CMD_TIMEOUT * HZ;
+#else
+		if (xhci->xhc_state & XHCI_STATE_REMOVING) {
+			ep->stop_cmd_timer.expires = jiffies + 1 * HZ;
+			xhci_info(xhci, "stop_cmd_timer: 1 sec\n");
+
+		} else {
+			ep->stop_cmd_timer.expires = jiffies +
+				XHCI_STOP_EP_CMD_TIMEOUT * HZ;
+			xhci_info(xhci, "stop_cmd_timer: 5 sec\n");
+		}
+#endif
 		add_timer(&ep->stop_cmd_timer);
 		xhci_queue_stop_endpoint(xhci, command, urb->dev->slot_id,
 					 ep_index, 0);

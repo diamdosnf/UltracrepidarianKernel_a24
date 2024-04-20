@@ -10,5 +10,3 @@ ARM
    hyp-abi
    psci
    pvtime
-   ptp_kvm
-   mmio-guard

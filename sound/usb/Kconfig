@@ -27,6 +27,15 @@ config SND_USB_AUDIO
 config SND_USB_AUDIO_USE_MEDIA_CONTROLLER
 	bool
 
+config SND_MTK_USB_AUDIO_MODULE
+	tristate "MTK USB Audio module"
+	depends on SND_USB_AUDIO
+	help
+	 Say Y here to include support for MTK USB Audio MODULE.
+	 To compile this driver as a module,
+	 choose M here: the module
+	 will be called mtk-usb-audio.
+
 config SND_USB_UA101
 	tristate "Edirol UA-101/UA-1000 driver"
 	select SND_PCM

@@ -31,7 +31,10 @@
 #include <linux/compiler.h>
 #include <linux/moduleparam.h>
 #include <linux/wakeup_reason.h>
-#include <trace/hooks/suspend.h>
+#if IS_ENABLED(CONFIG_SEC_PM)
+#include <linux/regulator/machine.h>
+#include <linux/clk/ti.h>
+#endif /* CONFIG_SEC_PM */
 
 #include "power.h"
 
@@ -405,6 +408,12 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 					 suspend_stats.failed_devs[last_dev]);
 		goto Platform_finish;
 	}
+
+#if IS_ENABLED(CONFIG_SEC_PM)
+	regulator_show_enabled();
+	sec_clock_debug_print_enabled();
+#endif /* CONFIG_SEC_PM */
+
 	error = platform_suspend_prepare_late(state);
 	if (error)
 		goto Devices_early_resume;
@@ -440,6 +449,7 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 	BUG_ON(!irqs_disabled());
 
 	system_state = SYSTEM_SUSPEND;
+
 	error = syscore_suspend();
 	if (!error) {
 		*wakeup = pm_wakeup_pending();
@@ -449,7 +459,6 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 			error = suspend_ops->enter(state);
 			trace_suspend_resume(TPS("machine_suspend"),
 				state, false);
-			trace_android_vh_early_resume_begin(NULL);
 		} else if (*wakeup) {
 			error = -EBUSY;
 		}
@@ -518,7 +527,6 @@ int suspend_devices_and_enter(suspend_state_t state)
 	} while (!error && !wakeup && platform_suspend_again(state));
 
  Resume_devices:
-	trace_android_vh_resume_begin(NULL);
 	suspend_test_start();
 	dpm_resume_end(PMSG_RESUME);
 	suspend_test_finish("resume devices");
@@ -529,7 +537,6 @@ int suspend_devices_and_enter(suspend_state_t state)
  Close:
 	platform_resume_end(state);
 	pm_suspend_target_state = PM_SUSPEND_ON;
-	trace_android_vh_resume_end(NULL);
 	return error;
 
  Recover_platform:

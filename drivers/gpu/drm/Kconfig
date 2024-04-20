@@ -482,3 +482,7 @@ config DRM_PANEL_ORIENTATION_QUIRKS
 config DRM_LIB_RANDOM
 	bool
 	default n
+
+source "drivers/gpu/drm/panel/mcd_panel/Kconfig"
+
+MCD_PANEL_PATH := drivers/gpu/drm/samsung/panel

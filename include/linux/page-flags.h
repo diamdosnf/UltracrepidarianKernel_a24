@@ -142,6 +142,9 @@ enum pageflags {
 #ifdef CONFIG_KASAN_HW_TAGS
 	PG_skip_kasan_poison,
 #endif
+#ifdef CONFIG_MTK_VM_DEBUG
+	PG_debug,
+#endif
 	__NR_PAGEFLAGS,
 
 	/* Filesystems */
@@ -275,6 +278,25 @@ static __always_inline void SetPage##uname(struct page *page)		\
 static __always_inline void ClearPage##uname(struct page *page)		\
 	{ clear_bit(PG_##lname, &policy(page, 1)->flags); }
 
+#ifdef CONFIG_MTK_VM_DEBUG
+#define __SETPAGEFLAG(uname, lname, policy)				\
+static __always_inline void __SetPage##uname(struct page *page)		\
+{									\
+	SetPageDebug(page);						\
+	__set_bit(PG_##lname, &policy(page, 1)->flags);			\
+	if (!TestClearPageDebug(page))					\
+		BUG();							\
+}
+
+#define __CLEARPAGEFLAG(uname, lname, policy)				\
+static __always_inline void __ClearPage##uname(struct page *page)	\
+{									\
+	SetPageDebug(page);						\
+	__clear_bit(PG_##lname, &policy(page, 1)->flags);		\
+	if (!TestClearPageDebug(page))					\
+		BUG();							\
+}
+#else
 #define __SETPAGEFLAG(uname, lname, policy)				\
 static __always_inline void __SetPage##uname(struct page *page)		\
 	{ __set_bit(PG_##lname, &policy(page, 1)->flags); }
@@ -282,6 +304,25 @@ static __always_inline void __SetPage##uname(struct page *page)		\
 #define __CLEARPAGEFLAG(uname, lname, policy)				\
 static __always_inline void __ClearPage##uname(struct page *page)	\
 	{ __clear_bit(PG_##lname, &policy(page, 1)->flags); }
+#endif
+
+#ifdef CONFIG_MTK_VM_DEBUG
+#define SETPAGEFLAGDEBUG(uname, lname, policy)				\
+static __always_inline void SetPage##uname(struct page *page)		\
+{									\
+	ClearPageDebug(page);						\
+	set_bit(PG_##lname, &policy(page, 1)->flags);			\
+	ClearPageDebug(page);						\
+}
+
+#define CLEARPAGEFLAGDEBUG(uname, lname, policy)			\
+static __always_inline void ClearPage##uname(struct page *page)		\
+{									\
+	ClearPageDebug(page);						\
+	clear_bit(PG_##lname, &policy(page, 1)->flags);			\
+	ClearPageDebug(page);						\
+}
+#endif
 
 #define TESTSETFLAG(uname, lname, policy)				\
 static __always_inline int TestSetPage##uname(struct page *page)	\
@@ -300,6 +341,13 @@ static __always_inline int TestClearPage##uname(struct page *page)	\
 	TESTPAGEFLAG(uname, lname, policy)				\
 	__SETPAGEFLAG(uname, lname, policy)				\
 	__CLEARPAGEFLAG(uname, lname, policy)
+
+#ifdef CONFIG_MTK_VM_DEBUG
+#define PAGEFLAGDEBUG(uname, lname, policy)				\
+		TESTPAGEFLAG(uname, lname, policy)			\
+		SETPAGEFLAGDEBUG(uname, lname, policy)			\
+		CLEARPAGEFLAGDEBUG(uname, lname, policy)
+#endif
 
 #define TESTSCFLAG(uname, lname, policy)				\
 	TESTSETFLAG(uname, lname, policy)				\
@@ -329,15 +377,28 @@ static inline int TestClearPage##uname(struct page *page) { return 0; }
 #define TESTSCFLAG_FALSE(uname)						\
 	TESTSETFLAG_FALSE(uname) TESTCLEARFLAG_FALSE(uname)
 
+#ifdef CONFIG_MTK_VM_DEBUG
+PAGEFLAG(Debug, debug, PF_ANY)
+	TESTCLEARFLAG(Debug, debug, PF_ANY)
+#endif
+
 __PAGEFLAG(Locked, locked, PF_NO_TAIL)
+#ifdef CONFIG_MTK_VM_DEBUG
+PAGEFLAGDEBUG(Waiters, waiters, PF_ONLY_HEAD) __CLEARPAGEFLAG(Waiters, waiters, PF_ONLY_HEAD)
+#else
 PAGEFLAG(Waiters, waiters, PF_ONLY_HEAD) __CLEARPAGEFLAG(Waiters, waiters, PF_ONLY_HEAD)
+#endif
 PAGEFLAG(Error, error, PF_NO_TAIL) TESTCLEARFLAG(Error, error, PF_NO_TAIL)
 PAGEFLAG(Referenced, referenced, PF_HEAD)
 	TESTCLEARFLAG(Referenced, referenced, PF_HEAD)
 	__SETPAGEFLAG(Referenced, referenced, PF_HEAD)
 PAGEFLAG(Dirty, dirty, PF_HEAD) TESTSCFLAG(Dirty, dirty, PF_HEAD)
 	__CLEARPAGEFLAG(Dirty, dirty, PF_HEAD)
+#ifdef CONFIG_MTK_VM_DEBUG
+PAGEFLAGDEBUG(LRU, lru, PF_HEAD) __CLEARPAGEFLAG(LRU, lru, PF_HEAD)
+#else
 PAGEFLAG(LRU, lru, PF_HEAD) __CLEARPAGEFLAG(LRU, lru, PF_HEAD)
+#endif
 PAGEFLAG(Active, active, PF_HEAD) __CLEARPAGEFLAG(Active, active, PF_HEAD)
 	TESTCLEARFLAG(Active, active, PF_HEAD)
 PAGEFLAG(Workingset, workingset, PF_HEAD)
@@ -640,6 +701,43 @@ static inline int PageTransCompound(struct page *page)
 }
 
 /*
+ * PageTransCompoundMap is the same as PageTransCompound, but it also
+ * guarantees the primary MMU has the entire compound page mapped
+ * through pmd_trans_huge, which in turn guarantees the secondary MMUs
+ * can also map the entire compound page. This allows the secondary
+ * MMUs to call get_user_pages() only once for each compound page and
+ * to immediately map the entire compound page with a single secondary
+ * MMU fault. If there will be a pmd split later, the secondary MMUs
+ * will get an update through the MMU notifier invalidation through
+ * split_huge_pmd().
+ *
+ * Unlike PageTransCompound, this is safe to be called only while
+ * split_huge_pmd() cannot run from under us, like if protected by the
+ * MMU notifier, otherwise it may result in page->_mapcount check false
+ * positives.
+ *
+ * We have to treat page cache THP differently since every subpage of it
+ * would get _mapcount inc'ed once it is PMD mapped.  But, it may be PTE
+ * mapped in the current process so comparing subpage's _mapcount to
+ * compound_mapcount to filter out PTE mapped case.
+ */
+static inline int PageTransCompoundMap(struct page *page)
+{
+	struct page *head;
+
+	if (!PageTransCompound(page))
+		return 0;
+
+	if (PageAnon(page))
+		return atomic_read(&page->_mapcount) < 0;
+
+	head = compound_head(page);
+	/* File THP is PMD mapped and not PTE mapped */
+	return atomic_read(&page->_mapcount) ==
+	       atomic_read(compound_mapcount_ptr(head));
+}
+
+/*
  * PageTransTail returns true for both transparent huge pages
  * and hugetlbfs pages, so it should only be called when it's known
  * that hugetlbfs pages aren't involved.
@@ -803,7 +901,7 @@ static inline void ClearPageSlabPfmemalloc(struct page *page)
 	 1UL << PG_private	| 1UL << PG_private_2	|	\
 	 1UL << PG_writeback	| 1UL << PG_reserved	|	\
 	 1UL << PG_slab		| 1UL << PG_active 	|	\
-	 1UL << PG_unevictable	| __PG_MLOCKED | LRU_GEN_MASK)
+	 1UL << PG_unevictable	| __PG_MLOCKED)
 
 /*
  * Flags checked when a page is prepped for return by the page allocator.
@@ -814,7 +912,7 @@ static inline void ClearPageSlabPfmemalloc(struct page *page)
  * alloc-free cycle to prevent from reusing the page.
  */
 #define PAGE_FLAGS_CHECK_AT_PREP	\
-	((((1UL << NR_PAGEFLAGS) - 1) & ~__PG_HWPOISON) | LRU_GEN_MASK | LRU_REFS_MASK)
+	(((1UL << NR_PAGEFLAGS) - 1) & ~__PG_HWPOISON)
 
 #define PAGE_FLAGS_PRIVATE				\
 	(1UL << PG_private | 1UL << PG_private_2)

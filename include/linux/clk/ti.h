@@ -319,5 +319,8 @@ static inline int omap36xx_clk_legacy_init(void) { return -ENXIO; }
 static inline int am35xx_clk_legacy_init(void) { return -ENXIO; }
 #endif
 
+#if IS_ENABLED(CONFIG_SEC_PM)
+void sec_clock_debug_print_enabled(void);
+#endif /* CONFIG_SEC_PM */
 
 #endif

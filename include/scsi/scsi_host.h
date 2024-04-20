@@ -26,21 +26,15 @@ struct scsi_transport_template;
 
 #define SG_ALL	SG_CHUNK_SIZE
 
+#ifdef CONFIG_ARCH_NO_SG_CHAIN
+#define SG_UFS SG_ALL
+#else
+#define SG_UFS 256
+#endif
+
 #define MODE_UNKNOWN 0x00
 #define MODE_INITIATOR 0x01
 #define MODE_TARGET 0x02
-
-/**
- * enum scsi_timeout_action - How to handle a command that timed out.
- * @SCSI_EH_DONE: The command has already been completed.
- * @SCSI_EH_RESET_TIMER: Reset the timer and continue waiting for completion.
- * @SCSI_EH_NOT_HANDLED: The command has not yet finished. Abort the command.
- */
-enum scsi_timeout_action {
-	SCSI_EH_DONE,
-	SCSI_EH_RESET_TIMER,
-	SCSI_EH_NOT_HANDLED,
-};
 
 struct scsi_host_template {
 	struct module *module;
@@ -65,7 +59,7 @@ struct scsi_host_template {
 
 
 #ifdef CONFIG_COMPAT
-	/* 
+	/*
 	 * Compat handler. Handle 32bit ABI.
 	 * When unknown ioctl is passed return -ENOIOCTLCMD.
 	 *
@@ -183,7 +177,7 @@ struct scsi_host_template {
 	 * this function, it *must* perform the task of setting the queue
 	 * depth on the device.  All other tasks are optional and depend
 	 * on what the driver supports and various implementation details.
-	 * 
+	 *
 	 * Things currently recommended to be handled at this time include:
 	 *
 	 * 1.  Setting the device queue depth.  Proper setting of this is
@@ -212,7 +206,7 @@ struct scsi_host_template {
 	 * has ceased the mid layer calls this point so that the low level
 	 * driver may completely detach itself from the scsi device and vice
 	 * versa.  The low level driver is responsible for freeing any memory
-	 * it allocated in the slave_alloc or slave_configure calls. 
+	 * it allocated in the slave_alloc or slave_configure calls.
 	 *
 	 * Status: OPTIONAL
 	 */
@@ -282,16 +276,6 @@ struct scsi_host_template {
 	 * Status: OPTIONAL
 	 */
 	int (* map_queues)(struct Scsi_Host *shost);
-
-	/*
-	 * SCSI interface of blk_poll - poll for IO completions.
-	 * Only applicable if SCSI LLD exposes multiple h/w queues.
-	 *
-	 * Return value: Number of completed entries found.
-	 *
-	 * Status: OPTIONAL
-	 */
-	int (* mq_poll)(struct Scsi_Host *shost, unsigned int queue_num);
 
 	/*
 	 * Check if scatterlists need to be padded for DMA draining.
@@ -365,16 +349,9 @@ struct scsi_host_template {
 	/*
 	 * This determines if we will use a non-interrupt driven
 	 * or an interrupt driven scheme.  It is set to the maximum number
-	 * of simultaneous commands a single hw queue in HBA will accept. Does
-	 * not include @reserved_tags.
+	 * of simultaneous commands a single hw queue in HBA will accept.
 	 */
 	int can_queue;
-
-	/*
-	 * Number of tags to reserve. A reserved tag can be allocated by passing
-	 * the BLK_MQ_REQ_RESERVED flag to blk_mq_alloc_request().
-	 */
-	unsigned reserved_tags;
 
 	/*
 	 * In many instances, especially where disconnect / reconnect are
@@ -477,7 +454,7 @@ struct scsi_host_template {
 	/*
 	 * Default value for the blocking.  If the queue is empty,
 	 * host_blocked counts down in the request_fn until it restarts
-	 * host operations as zero is reached.  
+	 * host operations as zero is reached.
 	 *
 	 * FIXME: This should probably be a value in the template
 	 */
@@ -517,7 +494,7 @@ struct scsi_host_template {
 	/* Delay for runtime autosuspend */
 	int rpm_autosuspend_delay;
 
-	ANDROID_KABI_USE(1, enum scsi_timeout_action (*eh_timed_out2)(struct scsi_cmnd *));
+	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);
@@ -567,7 +544,7 @@ struct Scsi_Host {
 	 */
 	struct list_head	__devices;
 	struct list_head	__targets;
-	
+
 	struct list_head	starved_list;
 
 	spinlock_t		default_lock;
@@ -591,7 +568,7 @@ struct Scsi_Host {
 	unsigned int host_failed;	   /* commands that failed.
 					      protected by host_lock */
 	unsigned int host_eh_scheduled;    /* EH scheduled without command */
-    
+
 	unsigned int host_no;  /* Used for IOCTL_GET_IDLUN, /proc/scsi et al. */
 
 	/* next two fields are used to bound the time spent in error handling */
@@ -645,7 +622,6 @@ struct Scsi_Host {
 	 * the total queue depth is can_queue.
 	 */
 	unsigned nr_hw_queues;
-	unsigned nr_maps;
 	unsigned active_mode:2;
 	unsigned unchecked_isa_dma:1;
 
@@ -654,7 +630,7 @@ struct Scsi_Host {
 	 * time being.
 	 */
 	unsigned host_self_blocked:1;
-    
+
 	/*
 	 * Host uses correct SCSI ordering not PC ordering. The bit is
 	 * set for the minority of drivers whose authors actually read
@@ -709,7 +685,7 @@ struct Scsi_Host {
 	unsigned char n_io_port;
 	unsigned char dma_channel;
 	unsigned int  irq;
-	
+
 
 	enum scsi_host_state shost_state;
 

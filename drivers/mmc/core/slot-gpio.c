@@ -17,6 +17,11 @@
 #include <trace/hooks/mmc_core.h>
 
 #include "slot-gpio.h"
+#ifdef CONFIG_MMC_SUPPORT_STLOG
+#include <linux/fslog.h>
+#else
+#define ST_LOG(fmt, ...)
+#endif
 
 struct mmc_gpio {
 	struct gpio_desc *ro_gpio;
@@ -31,15 +36,32 @@ static irqreturn_t mmc_gpio_cd_irqt(int irq, void *dev_id)
 {
 	/* Schedule a card detection after a debounce timeout */
 	struct mmc_host *host = dev_id;
+#ifndef CONFIG_SEC_FACTORY
 	struct mmc_gpio *ctx = host->slot.handler_priv;
+#endif
 	bool allow = true;
 
 	trace_android_vh_mmc_gpio_cd_irqt(host, &allow);
+	pr_info("%s: SDcard tray %s mmc detect change %s\n", mmc_hostname(host),
+			mmc_gpio_get_cd(host) ? "inserted." : "removed.",
+			allow ? "allowed." : "blocked.");
+	ST_LOG("%s: SDcard tray %s mmc detect change %s\n", mmc_hostname(host),
+			mmc_gpio_get_cd(host) ? "inserted." : "removed.",
+			allow ? "allowed." : "blocked.");
+
 	if (!allow)
 		return IRQ_HANDLED;
 
 	host->trigger_card_event = true;
+
+#ifdef CONFIG_SEC_FACTORY
+	if (mmc_gpio_get_cd(host))
+		mmc_detect_change(host, msecs_to_jiffies(50));
+	else
+		mmc_detect_change(host, 0);
+#else
 	mmc_detect_change(host, msecs_to_jiffies(ctx->cd_debounce_delay_ms));
+#endif
 
 	return IRQ_HANDLED;
 }

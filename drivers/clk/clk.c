@@ -3079,6 +3079,45 @@ static int clk_summary_show(struct seq_file *s, void *data)
 }
 DEFINE_SHOW_ATTRIBUTE(clk_summary);
 
+#if IS_ENABLED(CONFIG_SEC_PM)
+static int sec_clock_debug_print_clock(struct clk_core *c)
+{
+	if (clk_core_is_enabled(c)) {
+		pr_info("%*s%-*s %11d %12d %11lu %10lu %-3d\n",
+			3, "", 27, c->name,
+			c->enable_count, c->prepare_count,
+			clk_core_get_rate_recalc(c),
+			clk_core_get_accuracy_recalc(c),
+			clk_core_get_phase(c));
+		return 1;
+	}
+
+	return 0;
+}
+
+void sec_clock_debug_print_enabled(void)
+{
+	int count = 0;
+	struct clk_core *c;
+
+	pr_info("Enabled clocks:\n");
+	pr_info("   clock                         enable_cnt  prepare_cnt        rate   accuracy   phase\n");
+	pr_info("----------------------------------------------------------------------------------------\n");
+
+	clk_prepare_lock();
+
+	hlist_for_each_entry(c, &clk_root_list, child_node)
+		count += sec_clock_debug_print_clock(c);
+
+	hlist_for_each_entry(c, &clk_orphan_list, child_node)
+		count += sec_clock_debug_print_clock(c);
+
+	clk_prepare_unlock();
+
+	pr_info("Enabled clock count: %d\n", count);
+}
+#endif /* CONFIG_SEC_PM */
+
 static void clk_dump_one(struct seq_file *s, struct clk_core *c, int level)
 {
 	int phase;
@@ -3426,6 +3465,24 @@ static void clk_debug_unregister(struct clk_core *core)
 static int __init clk_debug_init(void)
 {
 	struct clk_core *core;
+
+#ifdef CLOCK_ALLOW_WRITE_DEBUGFS
+	pr_warn("\n");
+	pr_warn("********************************************************************\n");
+	pr_warn("**     NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE           **\n");
+	pr_warn("**                                                                **\n");
+	pr_warn("**  WRITEABLE clk DebugFS SUPPORT HAS BEEN ENABLED IN THIS KERNEL **\n");
+	pr_warn("**                                                                **\n");
+	pr_warn("** This means that this kernel is built to expose clk operations  **\n");
+	pr_warn("** such as parent or rate setting, enabling, disabling, etc.      **\n");
+	pr_warn("** to userspace, which may compromise security on your system.    **\n");
+	pr_warn("**                                                                **\n");
+	pr_warn("** If you see this message and you are not debugging the          **\n");
+	pr_warn("** kernel, report this immediately to your vendor!                **\n");
+	pr_warn("**                                                                **\n");
+	pr_warn("**     NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE           **\n");
+	pr_warn("********************************************************************\n");
+#endif
 
 	rootdir = debugfs_create_dir("clk", NULL);
 

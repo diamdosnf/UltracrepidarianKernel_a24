@@ -27,6 +27,7 @@ snd-usbmidi-lib-objs := midi.o
 
 # Toplevel Module Dependency
 obj-$(CONFIG_SND_USB_AUDIO) += snd-usb-audio.o snd-usbmidi-lib.o
+obj-$(CONFIG_SND_MTK_USB_AUDIO_MODULE) += mtk-usb-audio.o
 
 obj-$(CONFIG_SND_USB_UA101) += snd-usbmidi-lib.o
 obj-$(CONFIG_SND_USB_USX2Y) += snd-usbmidi-lib.o
