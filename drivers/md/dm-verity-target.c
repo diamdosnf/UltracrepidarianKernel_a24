@@ -497,7 +497,10 @@ static int verity_verify_io(struct dm_verity_io *io)
 		sector_t cur_block = io->block + b;
 		struct ahash_request *req = verity_io_hash_req(v, io);
 
+<<<<<<< HEAD
 		/* verify data block if bio->bi_status != BLK_STS_OK */
+=======
+>>>>>>> v5.10.209
 		if (v->validated_blocks && bio->bi_status == BLK_STS_OK &&
 		    likely(test_bit(cur_block, v->validated_blocks))) {
 			verity_bv_skip_block(v, io, &io->iter);
@@ -553,7 +556,10 @@ static int verity_verify_io(struct dm_verity_io *io)
 			add_fc_blks_entry(cur_block,v->data_dev->name);
 #endif
 			continue;
+<<<<<<< HEAD
 		}
+=======
+>>>>>>> v5.10.209
 		else {
 			if (bio->bi_status) {
 				/*
@@ -561,6 +567,7 @@ static int verity_verify_io(struct dm_verity_io *io)
 				 */
 				return -EIO;
 			}
+<<<<<<< HEAD
 #ifdef SEC_HEX_DEBUG
 			if (verity_handle_err_hex_debug(v, DM_VERITY_BLOCK_TYPE_DATA,
 					   cur_block, io, &start)) {
@@ -572,6 +579,11 @@ static int verity_verify_io(struct dm_verity_io *io)
 					   cur_block))
 				return -EIO;
 #endif
+=======
+			if (verity_handle_err(v, DM_VERITY_BLOCK_TYPE_DATA,
+					      cur_block))
+				return -EIO;
+>>>>>>> v5.10.209
 		}
 	}
 
@@ -616,8 +628,14 @@ static void verity_end_io(struct bio *bio)
 
 	/* SEC: Do not verify RAHEAD bio if status is not OK */
 	if (bio->bi_status &&
+<<<<<<< HEAD
 	    (!verity_fec_is_enabled(io->v) || (bio->bi_opf & REQ_RAHEAD) ||
 	     verity_is_system_shutting_down())) {
+=======
+	    (!verity_fec_is_enabled(io->v) ||
+	     verity_is_system_shutting_down() ||
+	     (bio->bi_opf & REQ_RAHEAD))) {
+>>>>>>> v5.10.209
 		verity_finish_io(io, bio->bi_status);
 		return;
 	}

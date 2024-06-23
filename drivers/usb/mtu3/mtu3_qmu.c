@@ -210,6 +210,7 @@ static struct qmu_gpd *advance_enq_gpd(struct mtu3_gpd_ring *ring)
 	return ring->enqueue;
 }
 
+/* @dequeue may be NULL if ring is unallocated or freed */
 static struct qmu_gpd *advance_deq_gpd(struct mtu3_gpd_ring *ring)
 {
 	if (ring->dequeue < ring->end)
@@ -495,8 +496,12 @@ static void qmu_done_tx(struct mtu3 *mtu, u8 epnum)
 	dev_dbg(mtu->dev, "%s EP%d, last=%p, current=%p, enq=%p\n",
 		__func__, epnum, gpd, gpd_current, ring->enqueue);
 
+<<<<<<< HEAD
 	while (gpd != NULL && gpd != gpd_current &&
 			!GET_GPD_HWO(gpd)) {
+=======
+	while (gpd && gpd != gpd_current && !GET_GPD_HWO(gpd)) {
+>>>>>>> v5.10.209
 
 		mreq = next_request(mep);
 
@@ -535,8 +540,12 @@ static void qmu_done_rx(struct mtu3 *mtu, u8 epnum)
 	dev_dbg(mtu->dev, "%s EP%d, last=%p, current=%p, enq=%p\n",
 		__func__, epnum, gpd, gpd_current, ring->enqueue);
 
+<<<<<<< HEAD
 	while (gpd != NULL && gpd != gpd_current &&
 			!GET_GPD_HWO(gpd)) {
+=======
+	while (gpd && gpd != gpd_current && !GET_GPD_HWO(gpd)) {
+>>>>>>> v5.10.209
 
 		mreq = next_request(mep);
 
